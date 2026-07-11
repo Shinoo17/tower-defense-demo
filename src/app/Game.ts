@@ -17,6 +17,10 @@ import { PlacementSystem } from '../systems/PlacementSystem';
 import { saves } from '../systems/SaveSystem';
 import type { Tower } from '../entities/Tower';
 import { ENEMIES } from '../config/enemies';
+import { assets } from '../assets/AssetManager';
+import { createTowerVisual } from '../entities/TowerVisual';
+import { getPerformanceProfile } from './Performance';
+import type { Enemy } from '../entities/Enemy';
 
 export type GamePhase = 'menu' | 'loading' | 'playing' | 'paused' | 'won' | 'lost' | 'campaign-complete' | 'endless-over';
 
@@ -24,6 +28,7 @@ export interface GameUI {
   hudChanged(): void;
   waveChanged(): void;
   towerSelected(tower: Tower | null): void;
+  enemySelected(enemy: Enemy | null): void;
   buildModeChanged(type: TowerType | null): void;
   showWin(stats: { livesLeft: number; reward: number; levelId: number }): void;
   showLose(): void;
@@ -54,10 +59,20 @@ export class Game {
   ui!: GameUI;
   private dirLight: THREE.DirectionalLight;
   private sessionSaveTimer = 0;
+  private menuLevel: BuiltLevel | null = null;
+  private menuMixers: THREE.AnimationMixer[] = [];
+  private menuWalkers: { root: THREE.Object3D; lane: number; speed: number; start: number }[] = [];
+  private menuTime = 0;
+  private menuRequest = 0;
+  private reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  private selectedEnemy: Enemy | null = null;
 
   constructor(container: HTMLElement) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    const performanceProfile = getPerformanceProfile();
+    document.documentElement.dataset.performance = performanceProfile.tier;
+    this.renderer = new THREE.WebGLRenderer({ antialias: performanceProfile.antialias, powerPreference: 'high-performance' });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, performanceProfile.pixelRatioCap));
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.shadowMap.enabled = saves.data.settings.shadows;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(this.renderer.domElement);
@@ -71,7 +86,7 @@ export class Game {
     this.dirLight = new THREE.DirectionalLight(0xfff2d9, 2.1);
     this.dirLight.position.set(8, 14, 6);
     this.dirLight.castShadow = true;
-    this.dirLight.shadow.mapSize.set(2048, 2048);
+    this.dirLight.shadow.mapSize.set(performanceProfile.shadowMapSize, performanceProfile.shadowMapSize);
     this.dirLight.shadow.camera.left = -14;
     this.dirLight.shadow.camera.right = 14;
     this.dirLight.shadow.camera.top = 14;
@@ -81,7 +96,11 @@ export class Game {
     this.scene.add(this.dirLight, this.dirLight.target);
 
     this.rig = new CameraRig(this.renderer.domElement);
-    this.effects = new EffectsSystem(this.scene);
+    this.effects = new EffectsSystem(
+      this.scene,
+      performanceProfile.particlesPerBurst,
+      performanceProfile.maxParticleBursts
+    );
     this.enemySys = new EnemySystem(this.scene, this.effects);
     this.projectiles = new ProjectileSystem(this.scene);
     this.towerSys = new TowerSystem(this.scene, this.enemySys, this.projectiles, this.effects);
@@ -91,6 +110,7 @@ export class Game {
     this.wireSystems();
     this.resize();
     window.addEventListener('resize', () => this.resize());
+    window.visualViewport?.addEventListener('resize', () => this.resize());
 
     this.loop = new GameLoop((dt, rawDt) => this.tick(dt, rawDt));
     this.loop.start();
@@ -102,12 +122,14 @@ export class Game {
       this.state.lives = Math.max(0, this.state.lives - enemy.def.livesCost);
       this.ui.hudChanged();
       if (this.state.lives <= 0) this.handleDefeat();
+      if (this.selectedEnemy === enemy) this.selectEnemy(null);
     };
     this.enemySys.onKilled = (enemy) => {
       if (!this.state) return;
       this.state.kills++;
       this.state.earn(enemy.reward);
       this.ui.hudChanged();
+      if (this.selectedEnemy === enemy) this.selectEnemy(null);
     };
     this.waveSys.onSpawn = (type, path, mods) => {
       const enemy = this.enemySys.spawn(type, path, mods);
@@ -138,8 +160,15 @@ export class Game {
     this.placement.onBuildRequest = (pad, type) => this.buildTower(pad, type);
     this.placement.onTowerClicked = (tower) => {
       this.setBuildMode(null);
+      this.selectEnemy(null);
       this.towerSys.select(tower);
       this.ui.towerSelected(tower);
+    };
+    this.placement.onEnemyClicked = (enemy) => {
+      this.setBuildMode(null);
+      this.towerSys.select(null);
+      this.ui.towerSelected(null);
+      this.selectEnemy(enemy);
     };
     this.placement.onEmptyClick = () => {
       if (this.placement.buildMode) this.setBuildMode(null);
@@ -147,6 +176,7 @@ export class Game {
         this.towerSys.select(null);
         this.ui.towerSelected(null);
       }
+      this.selectEnemy(null);
     };
   }
 
@@ -183,6 +213,7 @@ export class Game {
     this.ui.hudChanged();
     this.ui.waveChanged();
     this.ui.towerSelected(null);
+    this.ui.enemySelected(null);
     this.ui.buildModeChanged(null);
   }
 
@@ -198,6 +229,7 @@ export class Game {
   }
 
   private teardownLevel(): void {
+    this.clearMenuScene();
     this.flushRunStats();
     this.placement.clear();
     this.placement.enabled = false;
@@ -205,12 +237,65 @@ export class Game {
     this.projectiles.clear();
     this.enemySys.clear();
     this.effects.clear();
+    this.selectedEnemy = null;
     if (this.built) {
       this.built.dispose();
       this.built = null;
     }
     this.state = null;
     this.levelDef = null;
+  }
+
+  async showMenuScene(): Promise<void> {
+    if (this.menuLevel || this.phase !== 'menu') return;
+    const request = ++this.menuRequest;
+    const level = await buildLevel(LEVELS[0]);
+    if (this.phase !== 'menu' || request !== this.menuRequest) {
+      level.dispose();
+      return;
+    }
+    this.menuLevel = level;
+    this.scene.add(level.group);
+
+    const towerPositions = [level.pads[0]?.world, level.pads[2]?.world].filter(Boolean) as THREE.Vector3[];
+    towerPositions.forEach((position, index) => {
+      const tower = createTowerVisual(index === 0 ? 'archer' : 'cannon', index === 0 ? 2 : 1);
+      tower.position.set(position.x, 0.12, position.z);
+      tower.rotation.y = index ? -0.5 : 0.45;
+      level.group.add(tower);
+    });
+
+    const clip = assets.getClip(['Walking_A', 'Walking_B']);
+    ['Skeleton_Minion', 'Skeleton_Rogue', 'Skeleton_Warrior'].forEach((name, index) => {
+      const skeleton = assets.getSkinned(name);
+      skeleton.scale.setScalar(index === 2 ? 0.62 : 0.54);
+      skeleton.position.set(-5.5 - index * 1.6, 0.22, 1.8 + index * 0.95);
+      skeleton.rotation.y = Math.PI / 2;
+      level.group.add(skeleton);
+      if (clip && !this.reduceMotion) {
+        const mixer = new THREE.AnimationMixer(skeleton);
+        mixer.clipAction(clip).play();
+        this.menuMixers.push(mixer);
+      }
+      this.menuWalkers.push({ root: skeleton, lane: skeleton.position.z, speed: 0.36 + index * 0.08, start: skeleton.position.x });
+    });
+
+    this.rig.setBounds(-5, 5, -4, 4);
+    this.rig.setView(new THREE.Vector3(-0.6, 0, 0.5), 14.5, true);
+    this.rig.enabled = false;
+  }
+
+  private clearMenuScene(): void {
+    this.menuRequest++;
+    for (const mixer of this.menuMixers) mixer.stopAllAction();
+    this.menuMixers.length = 0;
+    this.menuWalkers.length = 0;
+    if (this.menuLevel) {
+      this.menuLevel.dispose();
+      this.menuLevel = null;
+    }
+    this.rig.enabled = true;
+    this.menuTime = 0;
   }
 
   private flushRunStats(): void {
@@ -266,11 +351,18 @@ export class Game {
   setBuildMode(type: TowerType | null): void {
     if (type && this.state && this.state.coins < TOWERS[type].levels[0].cost) return;
     if (type) {
+      this.selectEnemy(null);
       this.towerSys.select(null);
       this.ui.towerSelected(null);
     }
     this.placement.setBuildMode(type);
     this.ui.buildModeChanged(type);
+  }
+
+  private selectEnemy(enemy: Enemy | null): void {
+    if (this.selectedEnemy === enemy) return;
+    this.selectedEnemy = enemy;
+    this.ui.enemySelected(enemy);
   }
 
   private buildTower(pad: Pad, type: TowerType): void {
@@ -334,6 +426,20 @@ export class Game {
   // ------------------------------------------------------------ frame
 
   private tick(dt: number, rawDt: number): void {
+    if (this.phase === 'menu' && this.menuLevel) {
+      this.menuTime += rawDt;
+      for (const mixer of this.menuMixers) mixer.update(rawDt);
+      if (!this.reduceMotion) {
+        for (const walker of this.menuWalkers) {
+          walker.root.position.x = walker.start + ((this.menuTime * walker.speed) % 11);
+          walker.root.position.z = walker.lane + Math.sin(this.menuTime * 0.35) * 0.08;
+        }
+        this.rig.setView(
+          new THREE.Vector3(-0.6 + Math.sin(this.menuTime * 0.12) * 0.42, 0, 0.5 + Math.cos(this.menuTime * 0.1) * 0.28),
+          14.5 + Math.sin(this.menuTime * 0.09) * 0.35
+        );
+      }
+    }
     this.rig.update(rawDt);
     if (this.phase === 'playing' && dt > 0) {
       this.waveSys.update(dt);
@@ -349,9 +455,9 @@ export class Game {
   }
 
   private resize(): void {
-    const w = window.innerWidth;
-    const h = window.innerHeight;
-    this.renderer.setSize(w, h);
+    const w = Math.max(1, window.innerWidth);
+    const h = Math.max(1, window.innerHeight);
+    this.renderer.setSize(w, h, false);
     this.rig.resize(w, h);
   }
 

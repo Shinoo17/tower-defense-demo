@@ -14,6 +14,8 @@ export class CameraRig {
   private bounds = { minX: -10, maxX: 10, minZ: -10, maxZ: 10 };
   private dragging = false;
   private lastPointer = { x: 0, y: 0 };
+  private pointers = new Map<number, { x: number; y: number }>();
+  private pinchDistance = 0;
   private keys = new Set<string>();
   /** temporary focus override (boss intro) */
   private focus: THREE.Vector3 | null = null;
@@ -28,13 +30,42 @@ export class CameraRig {
     this.applyImmediate();
 
     el.addEventListener('pointerdown', (e) => {
-      if (e.button === 1 || e.button === 2) {
+      if (e.pointerType === 'touch') {
+        this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (this.pointers.size === 1) {
+          this.lastPointer = { x: e.clientX, y: e.clientY };
+        } else if (this.pointers.size === 2) {
+          this.pinchDistance = this.touchDistance();
+        }
+        el.setPointerCapture(e.pointerId);
+      } else if (e.button === 1 || e.button === 2) {
         this.dragging = true;
         this.lastPointer = { x: e.clientX, y: e.clientY };
         el.setPointerCapture(e.pointerId);
       }
     });
     el.addEventListener('pointermove', (e) => {
+      if (e.pointerType === 'touch' && this.pointers.has(e.pointerId)) {
+        const previous = this.pointers.get(e.pointerId)!;
+        this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (!this.enabled) return;
+        if (this.pointers.size === 2) {
+          const distance = this.touchDistance();
+          if (this.pinchDistance > 0) {
+            this.desiredZoom = clamp(
+              this.desiredZoom - (distance - this.pinchDistance) * 0.025,
+              MIN_ZOOM,
+              MAX_ZOOM
+            );
+          }
+          this.pinchDistance = distance;
+        } else if (this.pointers.size === 1) {
+          const dx = e.clientX - previous.x;
+          const dy = e.clientY - previous.y;
+          if (Math.abs(dx) + Math.abs(dy) > 1.5) this.panByScreen(dx * 0.72, dy * 0.72);
+        }
+        return;
+      }
       if (!this.dragging || !this.enabled) return;
       const dx = e.clientX - this.lastPointer.x;
       const dy = e.clientY - this.lastPointer.y;
@@ -43,6 +74,8 @@ export class CameraRig {
     });
     const stop = (e: PointerEvent) => {
       this.dragging = false;
+      this.pointers.delete(e.pointerId);
+      if (this.pointers.size < 2) this.pinchDistance = 0;
     };
     el.addEventListener('pointerup', stop);
     el.addEventListener('pointercancel', stop);
@@ -58,6 +91,12 @@ export class CameraRig {
     );
     window.addEventListener('keydown', (e) => this.keys.add(e.key.toLowerCase()));
     window.addEventListener('keyup', (e) => this.keys.delete(e.key.toLowerCase()));
+  }
+
+  private touchDistance(): number {
+    const points = [...this.pointers.values()];
+    if (points.length < 2) return 0;
+    return Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
   }
 
   private panByScreen(dx: number, dy: number): void {

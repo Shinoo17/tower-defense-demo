@@ -10,8 +10,8 @@ const msgEl = document.getElementById('loading-msg')!;
 async function boot(): Promise<void> {
   try {
     await assets.loadBoot((done, total) => {
-      barEl.style.width = `${Math.round((done / total) * 100)}%`;
-      msgEl.textContent = `Loading assets… ${done}/${total}`;
+      barEl.style.transform = `scaleX(${done / total})`;
+      msgEl.textContent = `Loading assets... ${done}/${total}`;
     });
   } catch (err) {
     console.error('Asset loading failed', err);

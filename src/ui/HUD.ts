@@ -4,13 +4,15 @@ import { frostSlow } from '../config/towers';
 import type { Game } from '../app/Game';
 import type { Tower } from '../entities/Tower';
 import { el } from '../utils/dom';
+import { towerPreviewImages } from './TowerPreview';
+import type { Enemy } from '../entities/Enemy';
 
 const ENEMY_ICONS: Record<string, string> = {
-  basic: '💀',
-  runner: '🏃',
-  armored: '🛡',
-  captain: '⭐',
-  boss: '👑',
+  basic: 'SK',
+  runner: 'RN',
+  armored: 'AR',
+  captain: 'CP',
+  boss: 'BS',
 };
 
 export class HUD {
@@ -28,6 +30,12 @@ export class HUD {
   private waveInfo: HTMLElement;
   private startBtn: HTMLButtonElement;
   private speedBtns: HTMLButtonElement[] = [];
+  private buildPanel: HTMLElement;
+  private buildDetail: HTMLElement;
+  private cancelBuildBtn: HTMLButtonElement;
+  private enemyPanel: HTMLElement;
+  private inspectedEnemy: Enemy | null = null;
+  private lastEnemyKey = '';
   onPause: () => void = () => {};
 
   constructor(parent: HTMLElement, game: Game) {
@@ -47,35 +55,62 @@ export class HUD {
     speed1.addEventListener('click', () => this.setSpeed(1));
     speed2.addEventListener('click', () => this.setSpeed(2));
     this.speedBtns = [speed1, speed2];
-    const pauseBtn = el('button', 'hud-btn', '⏸ Pause');
+    const pauseBtn = el('button', 'hud-btn pause', 'Pause');
     pauseBtn.addEventListener('click', () => this.onPause());
     top.append(this.coinsEl, this.livesEl, this.waveEl, this.enemiesEl, spacer, speed1, speed2, pauseBtn);
     this.root.appendChild(top);
 
     // ---- build panel (bottom-left)
-    const build = el('div', 'build-panel');
+    const build = el('section', 'build-panel');
+    this.buildPanel = build;
+    build.setAttribute('aria-label', 'Tower tray');
+    const buildHead = el('div', 'build-head');
+    buildHead.appendChild(el('strong', 'build-title', 'Build towers'));
+    const collapse = el('button', 'tray-toggle', 'Hide');
+    collapse.setAttribute('aria-expanded', 'true');
+    collapse.addEventListener('click', () => {
+      const collapsed = build.classList.toggle('collapsed');
+      collapse.textContent = collapsed ? 'Towers' : 'Hide';
+      collapse.setAttribute('aria-expanded', String(!collapsed));
+    });
+    buildHead.appendChild(collapse);
+    build.appendChild(buildHead);
+    const scroll = el('div', 'build-scroll');
+    const previews = towerPreviewImages();
     (Object.keys(TOWERS) as TowerType[]).forEach((t) => {
       const def = TOWERS[t];
       const c = el('button', 'build-card');
       c.style.setProperty('--tower-color', def.color);
+      c.setAttribute('aria-pressed', 'false');
       c.innerHTML = `
-        <div class="bc-name">${def.name.replace(' Tower', '')}</div>
-        <div class="bc-role">${def.role}</div>
-        <div class="bc-cost">🪙 ${def.levels[0].cost}</div>
-        <div class="bc-stats">dmg ${def.levels[0].damage} · rng ${def.levels[0].range} · ${def.levels[0].rate}/s</div>
+        <span class="bc-preview"><img src="${previews.get(t) ?? ''}" alt="${def.name} model preview"></span>
+        <span class="bc-copy">
+          <span class="bc-name">${def.name.replace(' Tower', '')}</span>
+          <span class="bc-role">${def.role}</span>
+          <span class="bc-cost"><span class="coin-icon" aria-hidden="true">C</span>${def.levels[0].cost}</span>
+        </span>
       `;
       c.addEventListener('click', () => {
         const active = this.game.placement.buildMode === t;
         this.game.setBuildMode(active ? null : t);
       });
       this.buildCards.set(t, c);
-      build.appendChild(c);
+      scroll.appendChild(c);
     });
+    build.appendChild(scroll);
+    const buildFoot = el('div', 'build-foot');
+    this.buildDetail = el('div', 'build-detail', 'Choose a tower, then tap a highlighted build pad.');
+    this.cancelBuildBtn = el('button', 'cancel-build hidden', 'Cancel placement');
+    this.cancelBuildBtn.addEventListener('click', () => this.game.setBuildMode(null));
+    buildFoot.append(this.buildDetail, this.cancelBuildBtn);
+    build.appendChild(buildFoot);
     this.root.appendChild(build);
 
     // ---- selected tower panel (right)
     this.towerPanel = el('div', 'tower-panel hidden');
     this.root.appendChild(this.towerPanel);
+    this.enemyPanel = el('div', 'enemy-panel tower-panel hidden');
+    this.root.appendChild(this.enemyPanel);
 
     // ---- wave panel (bottom-right)
     this.wavePanel = el('div', 'wave-panel');
@@ -104,17 +139,18 @@ export class HUD {
   updateStats(): void {
     const st = this.game.state;
     if (!st) return;
+    if (this.inspectedEnemy) this.renderEnemy();
     const ws = this.game.waveSys;
     if (st.coins !== this.last.coins) {
-      this.coinsEl.textContent = `🪙 ${st.coins}`;
+      this.coinsEl.innerHTML = `<span class="stat-label">Coins</span><strong>${st.coins}</strong>`;
       this.last.coins = st.coins;
       this.refreshAffordability();
     }
     if (st.lives !== this.last.lives) {
-      this.livesEl.textContent = `❤️ ${st.lives}`;
+      this.livesEl.innerHTML = `<span class="stat-label">Lives</span><strong>${st.lives}</strong>`;
       this.last.lives = st.lives;
     }
-    const total = ws.totalWaves === Infinity ? '∞' : String(ws.totalWaves);
+    const total = ws.totalWaves === Infinity ? 'All' : String(ws.totalWaves);
     const waveTxt = `Wave ${Math.max(1, ws.currentWaveNumber)} / ${total}`;
     if (waveTxt !== this.last.wave) {
       this.waveEl.textContent = waveTxt;
@@ -122,7 +158,7 @@ export class HUD {
     }
     const enemies = this.game.enemySys.aliveCount + ws.remainingInWave;
     if (enemies !== this.last.enemies) {
-      this.enemiesEl.textContent = `💀 ${enemies}`;
+      this.enemiesEl.innerHTML = `<span class="stat-label">Enemies</span><strong>${enemies}</strong>`;
       this.last.enemies = enemies;
     }
   }
@@ -136,7 +172,17 @@ export class HUD {
   }
 
   setBuildMode(type: TowerType | null): void {
-    for (const [t, card] of this.buildCards) card.classList.toggle('active', t === type);
+    for (const [t, card] of this.buildCards) {
+      const selected = t === type;
+      card.classList.toggle('active', selected);
+      card.setAttribute('aria-pressed', String(selected));
+      if (selected) card.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'nearest', inline: 'center' });
+    }
+    this.buildPanel.classList.toggle('building', !!type);
+    this.cancelBuildBtn.classList.toggle('hidden', !type);
+    this.buildDetail.textContent = type
+      ? `${TOWERS[type].name}: ${TOWERS[type].role}. Tap a green pad to build.`
+      : 'Choose a tower, then tap a highlighted build pad.';
   }
 
   // ---------------------------------------------------------------- wave panel
@@ -147,7 +193,7 @@ export class HUD {
     if (ws.phase === 'active' || ws.phase === 'level-done') {
       if (this.lastWaveKey !== 'active') {
         this.lastWaveKey = 'active';
-        this.waveInfo.innerHTML = '<div class="wave-title">Wave in progress…</div>';
+        this.waveInfo.innerHTML = '<div class="wave-title">Wave in progress</div>';
         this.startBtn.classList.add('hidden');
       }
       return;
@@ -164,18 +210,18 @@ export class HUD {
       .map(
         (e) =>
           `<div class="wp-row${e.isBoss ? ' boss' : e.isElite ? ' elite' : ''}">
-            <span>${ENEMY_ICONS[e.type] ?? '💀'} ${e.name}</span><span>× ${e.count}</span>
+            <span><span class="enemy-token">${ENEMY_ICONS[e.type] ?? 'SK'}</span>${e.name}</span><span>x ${e.count}</span>
           </div>`
       )
       .join('');
-    const bossWarn = preview.hasBoss ? '<div class="boss-warning">⚠ BOSS INCOMING</div>' : '';
+    const bossWarn = preview.hasBoss ? '<div class="boss-warning">Boss incoming</div>' : '';
     const timerTxt = timer !== null ? `<div class="wp-timer">Auto-start in ${timer}s</div>` : '';
     this.waveInfo.innerHTML = `
       <div class="wave-title">Next: Wave ${ws.waveIndex + 1}</div>
       ${bossWarn}${rows}${timerTxt}
     `;
     this.startBtn.classList.remove('hidden');
-    this.startBtn.innerHTML = bonus > 0 ? `Start Wave <span class="bonus">+🪙${bonus}</span>` : 'Start Wave';
+    this.startBtn.innerHTML = bonus > 0 ? `Start Wave <span class="bonus">+${bonus} coins</span>` : 'Start Wave';
   }
 
   // ---------------------------------------------------------------- tower panel
@@ -198,17 +244,17 @@ export class HUD {
 
     const upgradeHtml = next
       ? `<button class="tp-upgrade${canAfford ? '' : ' unaffordable'}" id="tp-upgrade">
-          Upgrade — 🪙${up}
-          <span class="tp-preview">dmg ${s.damage} → ${next.damage} · rng ${s.range} → ${next.range} · ${s.rate} → ${next.rate}/s</span>
+          Upgrade for ${up} coins
+          <span class="tp-preview">Damage ${s.damage} to ${next.damage}, range ${s.range} to ${next.range}, rate ${s.rate} to ${next.rate}/s</span>
         </button>`
-      : '<div class="tp-max">★ Max level</div>';
+      : '<div class="tp-max">Max level</div>';
 
     this.towerPanel.innerHTML = `
       <div class="tp-head" style="--tower-color:${def.color}">
         <span class="tp-name">${def.name}</span>
         <span class="tp-level">Lv ${tower.level}</span>
       </div>
-      <div class="tp-row"><span>Damage</span><span>${s.damage}${def.aoeRadius ? ' (area)' : ''}${def.kind === 'magic' ? ' ✨' : ''}</span></div>
+      <div class="tp-row"><span>Damage</span><span>${s.damage}${def.aoeRadius ? ' (area)' : ''}${def.kind === 'magic' ? ' magic' : ''}</span></div>
       <div class="tp-row"><span>Range</span><span>${s.range}</span></div>
       <div class="tp-row"><span>Attack speed</span><span>${s.rate}/s</span></div>
       ${slowLine}
@@ -218,7 +264,7 @@ export class HUD {
         <button data-p="strong" class="${tower.priority === 'strong' ? 'active' : ''}">Strong</button>
       </span></div>
       ${upgradeHtml}
-      <button class="tp-sell" id="tp-sell">Sell — 🪙${refund}</button>
+      <button class="tp-sell" id="tp-sell">Sell for ${refund} coins</button>
     `;
     this.towerPanel.classList.remove('hidden');
 
@@ -231,5 +277,44 @@ export class HUD {
         this.showTower(tower);
       });
     });
+  }
+
+  showEnemy(enemy: Enemy | null): void {
+    this.inspectedEnemy = enemy;
+    this.lastEnemyKey = '';
+    if (!enemy || enemy.state !== 'walking') {
+      this.enemyPanel.classList.add('hidden');
+      return;
+    }
+    this.renderEnemy();
+  }
+
+  private renderEnemy(): void {
+    const enemy = this.inspectedEnemy;
+    if (!enemy || enemy.state !== 'walking') {
+      this.inspectedEnemy = null;
+      this.enemyPanel.classList.add('hidden');
+      return;
+    }
+    const health = Math.max(0, Math.ceil(enemy.hp));
+    const armor = Math.round(enemy.def.armor * 100);
+    const speed = enemy.currentSpeed(this.game.enemySys.now).toFixed(2);
+    const key = `${enemy.id}:${health}:${speed}`;
+    if (key === this.lastEnemyKey) return;
+    this.lastEnemyKey = key;
+    this.enemyPanel.innerHTML = `
+      <div class="tp-head enemy-head">
+        <span class="tp-name">${enemy.def.name}</span>
+        <span class="tp-level">Enemy</span>
+      </div>
+      <div class="enemy-health" aria-label="${health} of ${enemy.maxHp} health">
+        <span style="transform:scaleX(${Math.max(0, enemy.hp / enemy.maxHp)})"></span>
+      </div>
+      <div class="tp-row"><span>Health</span><span>${health} / ${enemy.maxHp}</span></div>
+      <div class="tp-row"><span>Speed</span><span>${speed}</span></div>
+      <div class="tp-row"><span>Physical armor</span><span>${armor}%</span></div>
+      <div class="tp-row"><span>Reward</span><span>${enemy.reward} coins</span></div>
+    `;
+    this.enemyPanel.classList.remove('hidden');
   }
 }

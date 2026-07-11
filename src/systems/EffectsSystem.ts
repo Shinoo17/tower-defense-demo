@@ -9,23 +9,24 @@ interface Burst {
   active: boolean;
 }
 
-const PARTICLES = 14;
-const MAX_BURSTS = 40;
-
 export class EffectsSystem {
   private scene: THREE.Scene;
   private bursts: Burst[] = [];
+  private particles: number;
+  private maxBursts: number;
 
-  constructor(scene: THREE.Scene) {
+  constructor(scene: THREE.Scene, particles = 14, maxBursts = 40) {
     this.scene = scene;
+    this.particles = particles;
+    this.maxBursts = maxBursts;
   }
 
   private getBurst(): Burst | null {
     let b = this.bursts.find((x) => !x.active);
     if (!b) {
-      if (this.bursts.length >= MAX_BURSTS) return null;
+      if (this.bursts.length >= this.maxBursts) return null;
       const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(PARTICLES * 3), 3));
+      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(this.particles * 3), 3));
       const mat = new THREE.PointsMaterial({
         size: 0.09,
         transparent: true,
@@ -36,7 +37,7 @@ export class EffectsSystem {
       points.frustumCulled = false;
       points.visible = false;
       this.scene.add(points);
-      b = { points, mat, velocities: new Float32Array(PARTICLES * 3), life: 0, maxLife: 0, active: false };
+      b = { points, mat, velocities: new Float32Array(this.particles * 3), life: 0, maxLife: 0, active: false };
       this.bursts.push(b);
     }
     return b;
@@ -47,7 +48,7 @@ export class EffectsSystem {
     if (!b) return;
     const speed = opts.speed ?? 1.6;
     const attr = b.points.geometry.getAttribute('position') as THREE.BufferAttribute;
-    for (let i = 0; i < PARTICLES; i++) {
+    for (let i = 0; i < this.particles; i++) {
       attr.setXYZ(i, pos.x, pos.y, pos.z);
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(2 * Math.random() - 1);
@@ -75,7 +76,7 @@ export class EffectsSystem {
         continue;
       }
       const attr = b.points.geometry.getAttribute('position') as THREE.BufferAttribute;
-      for (let i = 0; i < PARTICLES; i++) {
+      for (let i = 0; i < this.particles; i++) {
         b.velocities[i * 3 + 1] -= 4.5 * dt;
         attr.setXYZ(
           i,

@@ -30,7 +30,7 @@ export class LevelSelect {
 
   show(endless: boolean): void {
     this.endlessMode = endless;
-    this.title.textContent = endless ? 'Endless Mode — Choose a Map' : 'Select Level';
+    this.title.textContent = endless ? 'Endless Mode: Choose a Map' : 'Select Level';
     this.rebuild();
     this.root.classList.remove('hidden');
   }
@@ -55,18 +55,18 @@ export class LevelSelect {
         : `<div class="level-best">${unlocked ? 'Not completed on ' + diff : ''}</div>`;
       const endlessBest = this.endlessMode ? saves.endlessBestFor(lvl.id, diff) : 0;
       const endlessLine = this.endlessMode
-        ? `<div class="level-best">Best wave: ${endlessBest > 0 ? endlessBest : '—'}</div>`
+        ? `<div class="level-best">Best wave: ${endlessBest > 0 ? endlessBest : 'None'}</div>`
         : '';
       card.innerHTML = `
         <div class="level-num">${lvl.id}${badge}</div>
         <div class="level-name">${lvl.name}</div>
         <div class="level-meta">
-          <span class="chip">${lvl.theme === 'snow' ? '❄ Snow' : '🌿 Grass'}</span>
-          <span class="chip">${this.endlessMode ? '∞ waves' : lvl.waves.length + ' waves'}</span>
+          <span class="chip">${lvl.theme === 'snow' ? 'Snow' : 'Grass'}</span>
+          <span class="chip">${this.endlessMode ? 'Unlimited waves' : lvl.waves.length + ' waves'}</span>
           <span class="chip">${lvl.paths.length} ${lvl.paths.length > 1 ? 'routes' : 'route'}</span>
         </div>
         ${this.endlessMode ? endlessLine : bestLine}
-        ${unlocked ? '' : '<div class="lock">🔒 ' + (this.endlessMode ? 'Complete this level first' : 'Complete previous level') + '</div>'}
+        ${unlocked ? '' : '<div class="lock">Locked: ' + (this.endlessMode ? 'complete this level first' : 'complete previous level') + '</div>'}
       `;
       if (unlocked) {
         card.addEventListener('click', () => this.onPick(lvl.id, this.endlessMode));

@@ -99,7 +99,7 @@ export const LEVELS: LevelDef[] = [
     theme: 'snow',
     gridW: 18,
     gridH: 14,
-    intro: 'Two frozen trails merge in the pass. Split your defenses — the merged road alone will not save you. A boss stirs beneath the ice.',
+    intro: 'Two frozen trails merge in the pass. Split your defenses; the merged road alone will not save you. A boss stirs beneath the ice.',
     paths: [
       [
         { x: 0, z: 2 }, { x: 7, z: 2 }, { x: 7, z: 6 }, { x: 11, z: 6 },
@@ -146,7 +146,7 @@ export const LEVELS: LevelDef[] = [
     theme: 'grass',
     gridW: 18,
     gridH: 14,
-    intro: 'The horde circles Ember Keep before striking its gate. From Wave 6, enemies sprint after passing the keep — target priority matters.',
+    intro: 'The horde circles Ember Keep before striking its gate. From Wave 6, enemies sprint after passing the keep, so target priority matters.',
     paths: [
       [
         { x: 0, z: 7 }, { x: 3, z: 7 }, { x: 3, z: 3 }, { x: 14, z: 3 },
@@ -198,7 +198,7 @@ export const LEVELS: LevelDef[] = [
     theme: 'snow',
     gridW: 20,
     gridH: 16,
-    intro: 'Three frozen roads converge on the Last Citadel. Hold every gate — the Skeleton Army sends everything it has.',
+    intro: 'Three frozen roads converge on the Last Citadel. Hold every gate as the Skeleton Army sends everything it has.',
     paths: [
       [
         { x: 0, z: 3 }, { x: 5, z: 3 }, { x: 5, z: 6 }, { x: 9, z: 6 },

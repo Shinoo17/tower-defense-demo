@@ -9,6 +9,7 @@ import { HUD } from './HUD';
 import { Overlays } from './Overlays';
 import { Tutorial } from './Tutorial';
 import { el } from '../utils/dom';
+import type { Enemy } from '../entities/Enemy';
 
 export class UIManager implements GameUI {
   private game: Game;
@@ -18,6 +19,7 @@ export class UIManager implements GameUI {
   private overlays: Overlays;
   private tutorial: Tutorial;
   private root: HTMLElement;
+  private loadingScreen: HTMLElement;
 
   constructor(game: Game) {
     this.game = game;
@@ -29,6 +31,12 @@ export class UIManager implements GameUI {
     this.hud = new HUD(this.root, game);
     this.overlays = new Overlays(this.root);
     this.tutorial = new Tutorial(this.root);
+    this.loadingScreen = el(
+      'div',
+      'level-loading hidden',
+      '<div class="level-loading-mark"></div><strong>Preparing the battlefield</strong><span>Setting towers and opening the roads...</span>'
+    );
+    this.root.appendChild(this.loadingScreen);
 
     this.wire();
     game.ui = this;
@@ -47,7 +55,7 @@ export class UIManager implements GameUI {
     this.menu.onContinue = () => {
       this.menu.hide();
       const next = Math.min(saves.data.highestUnlocked, LEVELS.length);
-      void this.game.startLevel(next, this.menu.difficulty, false);
+      this.launchLevel(next, false);
     };
     this.menu.onSettings = () => this.overlays.showSettings(false);
 
@@ -57,7 +65,7 @@ export class UIManager implements GameUI {
     };
     this.levelSelect.onPick = (levelId, endless) => {
       this.levelSelect.hide();
-      void this.game.startLevel(levelId, this.menu.difficulty, endless);
+      this.launchLevel(levelId, endless);
     };
 
     this.hud.onPause = () => {
@@ -131,6 +139,15 @@ export class UIManager implements GameUI {
 
   private showMenu(): void {
     this.menu.show();
+    void this.game.showMenuScene();
+  }
+
+  private launchLevel(levelId: number, endless: boolean): void {
+    this.loadingScreen.classList.remove('hidden');
+    void this.game.startLevel(levelId, this.menu.difficulty, endless).catch((error) => {
+      console.error('Failed to prepare level', error);
+      this.loadingScreen.innerHTML = '<strong>Could not prepare the battlefield</strong><span>Please return to the menu and try again.</span>';
+    });
   }
 
   // ------------------------------------------------------------ GameUI impl
@@ -145,6 +162,10 @@ export class UIManager implements GameUI {
   towerSelected(tower: Tower | null): void {
     this.hud.showTower(tower);
     if (tower) this.tutorial.onTowerSelected();
+  }
+
+  enemySelected(enemy: Enemy | null): void {
+    this.hud.showEnemy(enemy);
   }
 
   buildModeChanged(type: TowerType | null): void {
@@ -169,6 +190,7 @@ export class UIManager implements GameUI {
   }
 
   levelLoaded(def: LevelDef): void {
+    this.loadingScreen.classList.add('hidden');
     this.menu.hide();
     this.levelSelect.hide();
     this.hud.show();
@@ -176,7 +198,7 @@ export class UIManager implements GameUI {
     this.hud.updateWavePanel();
     const isEndless = !!this.game.state?.endless;
     this.overlays.showLevelIntro(
-      isEndless ? `${def.name} — Endless` : `Level ${def.id}: ${def.name}`,
+      isEndless ? `${def.name}: Endless` : `Level ${def.id}: ${def.name}`,
       isEndless
         ? 'Infinite waves of skeletons, growing stronger every wave. A boss arrives every fifth wave. How long can you hold?'
         : def.intro,

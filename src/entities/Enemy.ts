@@ -77,6 +77,7 @@ export class Enemy {
     this.pathLength = total;
 
     this.root = assets.getSkinned(def.model);
+    this.root.traverse((object) => (object.userData.enemy = this));
     this.root.scale.setScalar(def.scale);
     this.root.position.copy(path[0]);
     if (def.tint) {

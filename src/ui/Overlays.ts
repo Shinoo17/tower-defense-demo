@@ -95,7 +95,7 @@ export class Overlays {
       `
       <div class="overlay-panel">
         <h2 class="win-title">Level Complete!</h2>
-        <p>You kept <b>${stats.livesLeft}</b> lives — bonus 🪙${stats.reward}</p>
+        <p>You kept <b>${stats.livesLeft}</b> lives and earned a ${stats.reward} coin bonus.</p>
         <button class="menu-btn primary" data-a="next">Next Level</button>
         <button class="menu-btn" data-a="restart">Replay Level</button>
         <button class="menu-btn" data-a="menu">Main Menu</button>
@@ -159,7 +159,7 @@ export class Overlays {
       `
       <div class="overlay-panel">
         <h2>Endless Run Over</h2>
-        ${isRecord ? '<p class="new-record">🏆 New best!</p>' : ''}
+        ${isRecord ? '<p class="new-record">New best wave</p>' : ''}
         <div class="complete-stats">
           <div><span>Reached wave</span><b>${stats.wave}</b></div>
           <div><span>Best wave</span><b>${stats.best}</b></div>
